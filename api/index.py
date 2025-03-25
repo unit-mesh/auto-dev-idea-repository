@@ -1,4 +1,4 @@
-from flask import Flask, Response
+from flask import Flask, Response, request
 import requests
 import time
 import mistune
@@ -48,25 +48,57 @@ def fetch_release_info() -> dict:
     _cache['release_info_timestamp'] = time.time()
     return data
 
-def fetch_latest_release(idea_version: str) -> dict:
-    """获取指定IDE版本的最新插件发布信息"""
-    if idea_version not in plugin_info["versions"]:
-        raise ValueError(f"Unsupported IDE version: {idea_version}")
+def is_version_in_range(version: str, since_version: str, until_version: str) -> bool:
+    """检查版本是否在指定范围内
+    
+    :param version: 要检查的版本号
+    :param since_version: 最低支持版本
+    :param until_version: 最高支持版本（支持通配符，如'233.*'）
+    :return: 是否在范围内
+    """
+    # 移除版本号中的前缀（如'IU-'）
+    version = version.split('-')[-1]
+    
+    # 如果until_version包含通配符，只比较主版本号
+    if until_version.endswith('.*'):
+        until_version = until_version[:-2]
+        version = version[:len(until_version)]
+        since_version = since_version[:len(until_version)]
+    
+    return since_version <= version <= until_version
+
+def fetch_latest_release(idea_version: str, build_version: str = None) -> dict:
+    """获取指定IDE版本的最新插件发布信息
+    
+    :param idea_version: IDEA版本号（如'241'）
+    :param build_version: IDEA构建版本号（如'IU-243.26053.27'）
+    """
+    # 如果指定了idea_version，直接使用idea_version
+    matched_version = idea_version
+    # 如果没有提供idea_version, 则使用build_version进行匹配
+    if not matched_version:
+        for version, info in plugin_info["versions"].items():
+            if is_version_in_range(build_version, info["since_version"], info["until_version"]):
+                matched_version = version
+                break
+        
+    if not matched_version:
+        raise ValueError(f"Unsupported IDE version: {build_version}")
 
     data = fetch_release_info()
-    version_info = plugin_info["versions"][idea_version]
+    version_info = plugin_info["versions"][matched_version]
     tag_name = data["tag_name"]
     version = tag_name.lstrip("v")
     
     # 查找对应版本的插件文件
     plugin_file = next(
         (asset["browser_download_url"] for asset in data["assets"] 
-         if f"autodev-jetbrains-{version}-{idea_version}.zip" in asset["name"]),
+         if f"autodev-jetbrains-{version}-{matched_version}.zip" in asset["name"]),
         None
     )
 
     if not plugin_file:
-        raise Exception(f"Plugin file not found for version {version} {idea_version}")
+        raise Exception(f"Plugin file not found for version {version} {matched_version}")
 
     change_notes = mistune.html(data.get("body", ""))
 
@@ -103,8 +135,18 @@ def about():
 
 @app.route('/<idea_version>/updatePlugins.xml')
 @app.route('/updatePlugins.xml')
-def update_plugins(idea_version='241'):
-    """生成插件更新XML文件的路由"""
-    release_info = fetch_latest_release(idea_version)
-    xml_content = generate_updates_xml(release_info)
-    return Response(xml_content, mimetype='application/xml')
+def update_plugins(idea_version=''):
+    """
+    生成插件更新XML文件的路由
+    
+    :param idea_version: 路径指定的IDEA版本
+    """
+    build_version = request.args.get('build', None)
+    try:
+        release_info = fetch_latest_release(idea_version, build_version)
+        xml_content = generate_updates_xml(release_info)
+        return Response(xml_content, mimetype='application/xml')
+    except ValueError as e:
+        return str(e), 400
+    except Exception as e:
+        return str(e), 500
