@@ -63,6 +63,9 @@ def is_version_in_range(version: str, since_version: str, until_version: str) ->
     :param until_version: 最高支持版本（支持通配符，如'233.*'）
     :return: 是否在范围内
     """
+    if version is None:
+        return False
+
     # 移除版本号中的前缀（如'IU-'）
     version = version.split('-')[-1]
     
@@ -81,9 +84,9 @@ def fetch_latest_release(idea_version: str, build_version: str = None) -> dict:
     :param build_version: IDEA构建版本号（如'IU-243.26053.27'）
     """
     # 如果指定了idea_version，直接使用idea_version
-    matched_version = idea_version
+    matched_version = idea_version if idea_version else None
     # 如果没有提供idea_version, 则使用build_version进行匹配
-    if not matched_version:
+    if not matched_version and build_version:
         for version, info in plugin_info["versions"].items():
             if is_version_in_range(build_version, info["since_version"], info["until_version"]):
                 matched_version = version
