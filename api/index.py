@@ -39,14 +39,21 @@ def fetch_release_info() -> dict:
     if _cache and time.time() - cache_timestamp < CACHE_TIMEOUT:
         return _cache['release_info']
 
-    response = requests.get(GITHUB_API_URL)
-    if response.status_code != 200:
-        raise Exception(f"Failed to fetch GitHub release: {response.status_code}")
-    
-    data = response.json()
-    _cache['release_info'] = data
-    _cache['release_info_timestamp'] = time.time()
-    return data
+    try:
+        response = requests.get(GITHUB_API_URL)
+        if response.status_code != 200:
+            if _cache.get('release_info'):
+                return _cache['release_info']
+            raise Exception(f"Failed to fetch GitHub release: {response.status_code}")
+        
+        data = response.json()
+        _cache['release_info'] = data
+        _cache['release_info_timestamp'] = time.time()
+        return data
+    except Exception as e:
+        if _cache.get('release_info'):
+            return _cache['release_info']
+        raise e
 
 def is_version_in_range(version: str, since_version: str, until_version: str) -> bool:
     """检查版本是否在指定范围内
